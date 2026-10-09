@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Optional
 from markdown_it import MarkdownIt
@@ -39,13 +40,20 @@ class ConversionService:
             
         return template.replace('<!-- CONTENT_PLACEHOLDER -->', html_content)
 
-    async def _convert_to_pdf_async(self, html_content: str, output_path: str):
+    async def _convert_to_pdf_async(self, html_content: str, output_path: str, base_dir: Optional[Path] = None):
         async with async_playwright() as p:
             # Browser path is handled by PLAYWRIGHT_BROWSERS_PATH env var if set
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
-            
-            await page.set_content(html_content, wait_until='networkidle')
+
+            tmp_dir = base_dir if base_dir else Path(tempfile.gettempdir())
+            tmp_file = tmp_dir / "_md2pdf_tmp.html"
+            try:
+                tmp_file.write_text(html_content, encoding='utf-8')
+                await page.goto(tmp_file.as_uri(), wait_until='networkidle')
+            finally:
+                if tmp_file.exists():
+                    tmp_file.unlink()
             
             # Wait for MathJax and Mermaid hooks
             try:
@@ -82,7 +90,7 @@ class ConversionService:
         if not output_path:
             output_path = str(input_file.with_suffix('.pdf'))
             
-        asyncio.run(self._convert_to_pdf_async(html_content, output_path))
+        asyncio.run(self._convert_to_pdf_async(html_content, output_path, input_file.parent))
         return output_path
 
     def convert_to_docx(self, input_path: str, output_path: Optional[str] = None) -> str:
